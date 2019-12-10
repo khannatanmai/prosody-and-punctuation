@@ -1,0 +1,90 @@
+File type = "ooTextFile"
+Object class = "PitchTier"
+
+xmin = 0 
+xmax = 3.2358125 
+points: size = 28 
+points [1]:
+    number = 0.32290624999999995 
+    value = 143.18319259741 
+points [2]:
+    number = 0.37290625 
+    value = 143.18319259741 
+points [3]:
+    number = 0.5129062499999999 
+    value = 164.92468409215547 
+points [4]:
+    number = 0.5479062499999999 
+    value = 164.92468409215547 
+points [5]:
+    number = 0.57290625 
+    value = 176.44790221146252 
+points [6]:
+    number = 0.7079062500000001 
+    value = 176.44790221146252 
+points [7]:
+    number = 0.8779062499999999 
+    value = 130.84585508038668 
+points [8]:
+    number = 0.9279062499999999 
+    value = 130.84585508038668 
+points [9]:
+    number = 0.94790625 
+    value = 116.36479458784348 
+points [10]:
+    number = 0.97790625 
+    value = 116.36479458784348 
+points [11]:
+    number = 0.9929062499999999 
+    value = 115.83867558542472 
+points [12]:
+    number = 1.0229062499999995 
+    value = 115.83867558542472 
+points [13]:
+    number = 1.0779062499999998 
+    value = 136.7261949541227 
+points [14]:
+    number = 1.1529062499999982 
+    value = 136.7261949541227 
+points [15]:
+    number = 1.2129062499999999 
+    value = 162.19332148506058 
+points [16]:
+    number = 1.2879062499999983 
+    value = 162.19332148506058 
+points [17]:
+    number = 1.30290625 
+    value = 158.57441739900588 
+points [18]:
+    number = 1.3379062499999992 
+    value = 158.57441739900588 
+points [19]:
+    number = 1.55790625 
+    value = 130.9583116689786 
+points [20]:
+    number = 1.6229062499999987 
+    value = 130.9583116689786 
+points [21]:
+    number = 1.82290625 
+    value = 154.20061291402064 
+points [22]:
+    number = 2.007906249999996 
+    value = 154.20061291402064 
+points [23]:
+    number = 2.12290625 
+    value = 155.29172590851897 
+points [24]:
+    number = 2.232906249999998 
+    value = 116.19380833460997 
+points [25]:
+    number = 2.27790625 
+    value = 123.69116945138927 
+points [26]:
+    number = 2.427906249999997 
+    value = 123.69116945138927 
+points [27]:
+    number = 2.47790625 
+    value = 140.39412744777653 
+points [28]:
+    number = 2.5929062499999977 
+    value = 115.58847543637114 
