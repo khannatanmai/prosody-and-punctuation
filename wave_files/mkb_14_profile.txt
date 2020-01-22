@@ -1,6 +1,6 @@
 Prosodic profile for input file: /Users/khannatanmai/Documents/NLP_Research/Prosody/FinalPresentation/wave_files/mkb_14.wav
-Prosogram version: Prosogram v2.19e, (c) Piet Mertens
-Date (of analysis): Mon Dec  2 14:14:15 2019
+Prosogram version: Prosogram v2.20a, (c) Piet Mertens
+Date (of analysis): Wed Jan 22 20:45:19 2020
 
 Segmentation type: asyll
 Nucleus: 57 nuclei in signal
@@ -10,23 +10,23 @@ Nucleus: 57 nuclei in signal
 
 Pitch range of speaker(s): (based on 2 stylization values per nucleus)
      Speaker label: Range, Bottom, Mean, Median, Top, MeanOfST, StdevOfST
-     ANON         : 14.5ST, 95Hz (78.9ST), 147Hz (86.4ST), 144Hz (86.0ST), 219Hz (93.3ST), 86.2ST, 3.7ST
+     ANON         : 14.2ST, 95Hz (78.9ST), 147Hz (86.4ST), 144Hz (86.0ST), 216Hz (93.1ST), 86.2ST, 3.7ST
 
 Pitch range of speaker(s): (based on 2 raw F0 values per nucleus)
      Speaker label: P02, Mean, Median, P98
-     ANON         : 95Hz, 147Hz, 144Hz, 219Hz
+     ANON         : 95Hz, 147Hz, 144Hz, 216Hz
 
 Pitch variability of speaker(s):
      Speaker label: TrajIntra, TrajInter, TrajPhon, TrajIntraZ, TrajInterZ, TrajPhonZ, PropLevel, Gliss, Rises, Falls
-     ANON         : 5.2 ST/s, 21.6 ST/s, 13.9 ST/s, 1.4 sd/s, 5.8 sd/s, 3.8 sd/s, 89.5%, 5.3%, 5.3%, 0% 
+     ANON         : 5.5 ST/s, 21.1 ST/s, 14.1 ST/s, 1.5 sd/s, 5.7 sd/s, 3.8 sd/s, 89.5%, 5.3%, 5.3%, 0% 
 
 Temporal profile of speaker(s):
      Speaker label: SpeechRate, TotalDur, %Phonation, %Pauses, PhonTime, NuclDur, InterNuclDur, PauseDur
-     ANON         : 5.49 syll/s, 318.655 s, 98.5%, 1.5%, 314.000 s, 95.000 s, 219.000 s, 4.66 s 
+     ANON         : 5.51 syll/s, 315.680 s, 98.5%, 1.5%, 311.000 s, 95.000 s, 216.000 s, 4.68 s 
 
 Duration variability of speaker(s):
      Speaker label: NuclDurMean, NuclDurStdev, nPVI_nucldur, nPVI_voweldur, nPVI_sylldur
-     ANON         : 0.085 s, 0.055, 68.81, 0, 0 
+     ANON         : 0.081 s, 0.055, 71.18, 0, 0 
 
 
 TotalDur   = total speech time (in s) = internucleus time + intranucleus time + pause time

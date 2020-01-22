@@ -3,9 +3,9 @@
 # Requires Praat 6.0.43 or higher.
 
 # Author: Piet Mertens
-# Copyright 2003-2019 Piet Mertens
+# Copyright 2003-2020 Piet Mertens
 
-form Prosogram 2.19e (Sept 4, 2019)
+form Prosogram 2.20a (Jan 10, 2020)
 	optionmenu Task 1
 		option Prosogram (writes graphics files)
 		option Calculate intermediate data files & Prosodic profile (no graphics files)
@@ -55,6 +55,8 @@ form Prosogram 2.19e (Sept 4, 2019)
 		option G=0.32/T^2, DG=30, dmin=0.050
 		option G=0.24-0.32/T^2 (adaptive), DG=30, dmin=0.050
 		option G=0.16-0.32/T^2 (adaptive), DG=30, dmin=0.050
+		option G=0.0/T^2, DG=20, dmin=0.035
+		option G=0.0/T^2, DG=40, dmin=0.035
    comment Plotting options:
 	optionmenu View: 3
 		option Compact, light

@@ -3,7 +3,7 @@
 # Author: Piet Mertens
 # Requires Praat 6.0.43 or higher.
 # For documentation see http://sites.google.com/site/prosogram/
-# Last modification: 2019-07-01
+# Last modification: 2020-01-16
 # 2017-01-13	Global variable "filename_extensions_sound$" specifies accepted file extensions for sound files 
 # 2017-03-14	added mp3 as an accepted file extension for sound files 
 # 2017-09-04	added prosodic profile summary in construct_filenames  
@@ -31,6 +31,8 @@
 # 2019-04-30	many changes
 # 2019-07-01	small changes to correct bugs introduced by v2.19a
 # 2019-09-03	remove double double quotes in strings passed to @msg
+# 2019-11-29	added batch command "hesitations"
+# 2019-12-03	hesitation detection
 
 
 
@@ -65,13 +67,19 @@ filename_extensions_sound$ = ":wav:aiff:aifc:nist:flac:sound:s16:mp3:"
 #     prepare_plotted_textgrid		create textgrid used in prosogram drawing
 #     load_intermediate_data_files
 #     get_segmentation				read or calculate segmentation (phonetic alinment, etc.)
+#       read_nuclei_file_interactive_mode	read internal TextGrid from earlier run
+#       copy_tiers_from_segmentation_textgrid
 #       make_segmentation			calculate segmentation
-#       safe_nuclei
+#       safe_nuclei					check boundaries of nuclei: unvoiced fragments, octave jumps, etc.
+#     create_table_of_nuclei		create table of nuclei with prosodic features
+#     initialize_nucldat			initialize some columns in table of nuclei
 #     speaker_info_get				list all speakers in annotation and add speaker id to nucldat table 
-#     stylize_nuclei				pitch stylization
-#     pitchrange_speakers
+#     stylize_nuclei				pitch contour stylization
+#     pitchrange_speakers			calculate pitch range of each speaker
 #     pitchrange_normalized_pitch
 #     prosodic_profile
+#     prosodic_profile_new
+#     detect_hesitations			detect hesitations from phonetic labels, acoustic prosodic features or words
 #     store_stylization
 #     speaker_autorange
 #     gr_start_picturewin
@@ -79,6 +87,7 @@ filename_extensions_sound$ = ":wav:aiff:aifc:nist:flac:sound:s16:mp3:"
 #     cleanup_current_file
 #     cleanup_global
 #     store_features				write spreadsheet with prosodic features for syllables
+#
 # Commands in batch mode:
 # prosogram							(batch mode) calculate prosogram
 #   prosogram_variants				variants for polytonia, boundary detection, stress detection, etc.
@@ -86,7 +95,7 @@ filename_extensions_sound$ = ":wav:aiff:aifc:nist:flac:sound:s16:mp3:"
 # segmentation						(batch mode) calculate automatic segmentation
 # calculate_pitch					(batch mode) calculate pitch (two-pass algorithm)
 
-version$ = "Prosogram v2.19e"
+version$ = "Prosogram v2.20a"
 ; @logging: "reset debug timed", "_log.txt"
 
 
@@ -102,7 +111,7 @@ include util.praat
 ;if (boundary_annotation or polytonia_annotation)
 ; include polytonia.praat
 ; include rules.praat
-;include prominence.praat
+; include prominence.praat
 ;include duration.praat
 ;include elasticity.praat
 ;endif
@@ -161,23 +170,30 @@ endif
 procedure initialization_main
    draw_prosograms = 1			; draw_prosograms 			(modified by task_flags and by prosogram_variants)
    save_intermediate_data = 0	; save intermediate data 	(modified by task_flags and by prosogram_variants)
+   hesitation_annotation = 0	; save detected hesitations 
+   hesitation_method$ = "none"	; "annotation" / "phon+pros" / "words" / "none"
+   pause_method$ = "nuclei"		; "nuclei" / "phon_tier" / "syll_tier"
    polytonia_annotation = 0		; automatic annotation of pitch movements and pitch levels
    calc_prominence = 0			; compute prominence measures
    boundary_annotation = 0		; automatic detection of prosodic boundaries
    stress_annotation = 0		; automatic detection of stress
    needs_loudness = 0			; compute loudness based on excitation spectrum
    
-   ; Plotting options:
+   ; Plotting 
    viewport_width = 7.5			; width of viewport used for prosogram (inches)
    clip_to_Y_range = 0			; clip stylisation to Y range
+   ; Plotting options:
    greyscale = 0				; use greyscale instead of colors
-   show_pitchrange = 0			; used in gr_display_prosogram
-   show_pauses = 0				; show detected pauses by "P" ; used in gr_display_prosogram
-   show_prominence = 0			; used in gr_display_prosogram
+   show_pitchrange = 0			;
+   show_pauses = 0				; show detected pauses by "P"
+   show_prominence = 0			;
    show_pseudosyllables = 0		; show pseudosyllables in textgrid
-   show_harmonicity = 0			; used in gr_display_prosogram
-   show_elasticity = 0			; used in gr_display_prosogram
-   show_localrate = 0			; used in gr_display_prosogram
+   show_harmonicity = 0			;
+   show_elasticity = 0			;
+   show_localrate = 0			;
+   show_rhythm = 0				;
+   show_hesitations = 0			;
+
    single_fname_graphics_output = 0; when true, all graphic files will be numbered using the same basename
    mindur_pause_anno = 0.2		; min duration for pause in annotation
    prefilterHP100 = 0			; Apply HP filtering to avoid problems with low quality audio recordings
@@ -378,7 +394,8 @@ procedure process_one_input_file: anal_t1, anal_t2, .fullname$
    endif
 
    if (needs_stylization or task == task_segmentation)
-      if (polytonia_annotation or needs_pitchrange)		; analyse entire signal
+      ; if (polytonia_annotation or needs_pitchrange)	; analyse entire signal
+      if (needs_pitchrange)								; analyse entire signal
          t1s = signal_start
          t2s = signal_finish
       else												; analyse only part of the speech signal
@@ -388,11 +405,11 @@ procedure process_one_input_file: anal_t1, anal_t2, .fullname$
       if (not task == task_interactive)
          @gr_printline: "Segmentation into syllabic nuclei. Method='segmentation_name$', Time range='t1s:3'-'t2s:3'"
       endif
-	  @get_segmentation: segm_type
+      @get_segmentation: segm_type
       ; also does @safe_nuclei
    endif
 
-   if (task == task_segmentation)	; post-processing segmentation results and write to file
+   if (task == task_segmentation)					; post-processing segmentation results and write to file
       selectObject: nucleiID
       .tmp = Extract tier: nucleus_tier
       .tmpN = Into TextGrid
@@ -429,7 +446,6 @@ procedure process_one_input_file: anal_t1, anal_t2, .fullname$
       goto file_done
    endif
 
-;@gr_printline: "needs_stylization='needs_stylization'"
    if (needs_stylization)
       if (nrof_nuclei_analysed < 1)
          @error_msg: "No syllabic nuclei found in speech signal."
@@ -451,6 +467,20 @@ procedure process_one_input_file: anal_t1, anal_t2, .fullname$
 
    if (needs_stylization)
       @initialize_nucldat: t1s, t2s
+
+      if (task <> task_interactive)
+         ; hesitations are used in duration data, in Polytonia, in detection of boundaries and prominence
+         @msg: "Detecting hesitations (method='hesitation_method$')..."
+         @detect_hesitations: anal_t1, anal_t2, hesitation_method$
+         if (hesitation_annotation)
+            selectObject: nucleiID
+            .tmpID = Extract one tier: hesitation_tier
+            Write to text file: hesitfile$
+            @msg: "Hesitation annotation saved to file... 'hesitfile$'"
+            removeObject: .tmpID
+         endif
+      endif
+
       @debug_msg: "process_one_input_file: needs_stylization"
       if (not stylization_available)
          # Create pitch tier object for stylization
@@ -468,26 +498,26 @@ procedure process_one_input_file: anal_t1, anal_t2, .fullname$
       endif
 	  ; next line comes after stylize_nuclei, because it uses values in nucldatID
 
-     ; @debug_msg: "process_one_input_file: profile_available='profile_available' needs_pitchrange='needs_pitchrange'"
-     if (not profile_available)		; in interactive mode profile may have been read from file
-      @speaker_info_get
-      @profile_table_create
-      @profile_table_prepare
-      profile_available = 1
-      ; Table is available, but needs to be filled by @pitchrange_speakers
-      if (needs_pitchrange)
-         ;if (variableExists ("corpus$") and corpus$ = "Proust" and variableExists ("corpus_speaker_range_1$"))
-         ;   @msg: "Reading pitch range from corpus_speaker_range..."
-         ;   speaker_range_1$ = corpus_speaker_range_1$
-         @gr_printline: "Calculating pitch range..."
-         @pitchrange_speakers
-         ; pitchrange and other values stored in prosodic profile table
-         if (task <> task_interactive)
-            @msg: "Calculating pitch range normalized pitch..."
-            @pitchrange_normalized_pitch
+      ; @debug_msg: "process_one_input_file: profile_available='profile_available' needs_pitchrange='needs_pitchrange'"
+      if (not profile_available)		; in interactive mode profile may have been read from file
+         @speaker_info_get
+         @profile_table_create
+         @profile_table_prepare
+         profile_available = 1
+         ; Table is available, but needs to be filled by @pitchrange_speakers
+         if (needs_pitchrange)
+            ;if (variableExists ("corpus$") and corpus$ = "Proust" and variableExists ("corpus_speaker_range_1$"))
+            ;   @msg: "Reading pitch range from corpus_speaker_range..."
+            ;   speaker_range_1$ = corpus_speaker_range_1$
+            @gr_printline: "Calculating pitch range of each speaker..."
+            @pitchrange_speakers
+            ; pitchrange and other values stored in prosodic profile table
+            if (task <> task_interactive)
+               @msg: "Calculating pitch range normalized pitch..."
+               @pitchrange_normalized_pitch
+            endif
          endif
       endif
-     endif
 
       if (needs_prosodic_profile and (task <> task_interactive) and (not polytonia_annotation))
          ; Write prosodic profile report file
@@ -500,14 +530,6 @@ procedure process_one_input_file: anal_t1, anal_t2, .fullname$
          @update_global_report
       endif
 
-      if (syllables_available)	; hesitations used in duration data and boundary/prominence detection
-         @msg: "Detecting hesitations... (hesitations provided by annotation = 'hesitation_available')"
-         if (corpus$ = "gvlex")
-            @detect_hesitations: anal_t1, anal_t2, "automatic"
-         else
-            @detect_hesitations: anal_t1, anal_t2, "annotation"
-         endif
-      endif
       if (calc_prominence)
          @msg: "Calculating prominence..."
          @calculate_prominence_measures
@@ -515,9 +537,10 @@ procedure process_one_input_file: anal_t1, anal_t2, .fullname$
       if (show_pseudosyllables and draw_prosograms)
         @grid_append_tier: nucleiID, syllable_tier, "newgridID"
       endif
+
       if (polytonia_annotation)
-         @msg: "Tonal annotation..."
-         @polytonia_main: anal_t1, anal_t2
+         @msg: "Tonal annotation... (hesitation_method='hesitation_method$')"
+         @polytonia_main: anal_t1, anal_t2, hesitation_method$
          if (draw_prosograms)
             @grid_append_tier: nucleiID, polytonia_tier, "newgridID"
             if (not segfile_available)
@@ -526,12 +549,14 @@ procedure process_one_input_file: anal_t1, anal_t2, .fullname$
             endif
          endif
          selectObject: nucleiID
-         tmpID = Extract one tier: polytonia_tier
+         .tmpID = Extract one tier: polytonia_tier
          Write to text file: polytonia_file$
          @msg: "Tonal annotation saved to file... 'polytonia_file$'"
-         removeObject: tmpID
+         removeObject: .tmpID
       endif
+
       if (boundary_annotation)
+         @msg: "Boundary annotation..."
          show_prominence = 0		; plot prominence measures
          show_lengthening = 1		; plot lengthening
          boundary_annotation_verbose = 1
@@ -541,21 +566,25 @@ procedure process_one_input_file: anal_t1, anal_t2, .fullname$
             @error_msg: "Boundary annotation requires Syllabic segmentation method" 
             segm_type = segm_msyllvow
          endif
-         if (corpus$ = "project_frfc")
-            boundary_use_nuclei = 0	; 0= use pauses from annotation. 1= use gaps between nuclei 
-         else
-            boundary_use_nuclei = 1	; 0= use pauses from annotation. 1= use gaps between nuclei 
+         if (pause_method$ == "syll_tier")
+            boundary_use_nuclei = 0	; use pauses from annotation
+         elsif (pause_method$ == "nuclei"
+            boundary_use_nuclei = 1	; use gaps between nuclei 
          endif
          @msg: "Calculating boundaries (boundary_use_nuclei='boundary_use_nuclei')..."
          boundary_skip_hesit = 0 
-         call boundary_analysis anal_t1 anal_t2 boundary_use_nuclei boundary_skip_hesit
+         @boundary_analysis: anal_t1, anal_t2, boundary_use_nuclei, boundary_skip_hesit
          selectObject: nucleiID
          tmpID = Extract one tier: boundary_tier
          Write to text file: boundaryfile$
-         @grid_append_tier: nucleiID, boundary_tier, "newgridID"
-         @grid_append_tier: nucleiID, boundary_tier, "segmentationID"
-         call boundary_pass2 anal_t1 anal_t2
-         @grid_append_tier: nucleiID, boundary2_tier, "newgridID"
+         if (draw_prosograms)
+            @grid_append_tier: nucleiID, boundary_tier, "newgridID"
+            @grid_append_tier: nucleiID, boundary_tier, "segmentationID"
+         endif
+         @boundary_pass2: anal_t1, anal_t2
+         if (draw_prosograms)
+            @grid_append_tier: nucleiID, boundary2_tier, "newgridID"
+         endif
          call tier_get segmentationID "^boundary-manu$" ref_tier "Cannot find boundary reference tier in segmentation grid" 0
          call create_evaluation_data segmentationID ref_tier 'evalfile$' 
          @msg: "Boundaries ready"
@@ -724,7 +753,7 @@ procedure map_segmentation_type: .method$
       @fatal_error: "Unknown segmentation type: '.method$'"
    endif
    if (boundary_annotation)
-         @map_segmentation_type: segmentation_name$
+      @debug_msg: "map_segmentation_type: boundary_annotation, segmentation name='segmentation_name$' ('segm_type')"
          if (not (segm_type == segm_msyllvow or segm_type == segm_mrhyme or segm_type == segm_msyllpeak))
             @error_msg: "Boundary annotation requires Syllabic segmentation method" 
             segm_type = segm_msyllvow
@@ -790,6 +819,7 @@ procedure task_flags
       if (polytonia_annotation)
          needs_prosodic_profile = 1	; because pitch range information is stored in profileID !!
          needs_pitchrange = 1
+         show_hesitations = 1
       endif
       show_prominence = 0			; plot prominence measures
       if (boundary_annotation)
@@ -802,6 +832,11 @@ procedure task_flags
          calc_prominence = 1
          show_prominence = 1		; plot prominence measures 
          pause_use_nuclei = 1		; 1= use gaps between nuclei; 0= use pauses from annotation
+      endif
+      if (hesitation_annotation)
+         needs_segm_tg = 1
+         needs_pitchrange = 0
+         needs_picture_win = 0
       endif
    elsif (task == task_pitch_plot)
       needs_stylization = 0
@@ -1069,14 +1104,15 @@ procedure initialization_per_file
    profile_available = 0		; 1 if profile data has been read from saved <basename>_profile_data.txt
    reuse_nucl = 0				; 1 if nucleus file could be read and used as segmentation
    reuse_styl = 0
-   phones_available = 0			; 1 if phon tier is found
-   syllables_available = 0		; 1 if syll tier is found
+   phones_available = 0			; 1 if phoneme tier is found in annotation TextGrid
+   syllables_available = 0		; 1 if syllable tier is found in annotation TextGrid
+   words_available = 0			; 1 if word tier is found in annotation TextGrid
    creak_available = 0			; creak textgrid/tier found and read ?
    speaker_available = 0		; speaker textgrid/tier found and read ?
    hesitation_available = 0		; hesitation textgrid/tier found and read ?
    newgrid_available = 0
    nrof_nuclei_analysed = 0
-   success = 1					; 0 if error encountered while processing input file
+   success = 1				; 0 if error encountered while processing input file
 endproc
 
 
@@ -1135,7 +1171,8 @@ procedure construct_filenames: .infname$
    profile_file$  = .path$ + "_profile_data.txt"	; prosodic profile data, for current input speech file (headerless spreadsheet file)
    autosegfile$   = .path$ + "_auto.TextGrid"		; TextGrid file with output from automatic segmentation into syllables
    polytonia_file$ = .path$ + "_polytonia.TextGrid"	; TextGrid file with output from Polytonia
-   boundaryfile$  = .path$ + "_boundary.TextGrid"
+   boundaryfile$  = .path$ + "_boundary.TextGrid"	; TextGrid file with detected prosodic boundaries
+   hesitfile$	  = .path$ + "_hesit.TextGrid"		; TextGrid file with detected hesitations
    evalfile$	  = .path$ + "_eval.txt"
    harmonicityfile$ = .path$ + ".Harmonicity"
 
@@ -1156,7 +1193,7 @@ procedure construct_filenames: .infname$
       else
          output_fname$ = indir$ + basename$ + "_" + output_suffix$
       endif
-      if (task == task_prosogram)
+      if (task == task_prosogram and draw_prosograms)
          @msg: "Graphics file will be written to (path+basename): <'output_fname$'>"
       endif
       @debug_msg: "construct_filenames: batch_mode, output_fname=<'output_fname$'>"
@@ -1218,8 +1255,7 @@ procedure corpus_conversion: .step, .gridname$, .corpus$
          @tier_number_by_name: .grid, "turns"
          if (result)
             Duplicate tier: result, 1, "speaker"
-			Replace interval texts: 1, 1, 0, "([a-zA-Z]*)[0-9]*", "\1"
-         else
+            Replace interval texts: 1, 1, 0, "([a-zA-Z]*)[0-9]*", "\1"
          endif
       endif
    endif
@@ -1311,12 +1347,12 @@ procedure prepare_plotted_textgrid: ltiers$
       @fatal_error: "Invalid character (double quote) in field <Tiers to show>. Please check content of this field."
    endif
    nrofplottedtiers = 0
-   if (segfile_available == 0 and polytonia_annotation)
+   if (segfile_available == 0 and (polytonia_annotation or boundary_annotation))
       newgridID = Create TextGrid: signal_start, signal_finish, "dummy"
       newgrid_available = 1
    endif
    if (segfile_available)
-      select segmentationID
+      selectObject: segmentationID
       tiers = 0
       nrofTiers = Get number of tiers
       @tier_number_by_name: segmentationID, "^[Ss]peaker$"
@@ -1811,6 +1847,170 @@ procedure get_segmentation: method
    @debug_msg: "get_segmentation: method='method' name='segmentation_name$'"
 
    if (task == task_interactive)
+      @read_nuclei_file_interactive_mode
+;@gr_printline: "segmentation_available='segmentation_available' reuse_nucl='reuse_nucl' nr='nrof_nuclei_analysed'"
+   endif ; task_interactive
+
+   if (not segmentation_available)
+       @debug_msg: "get_segmentation: segmentation not available"
+# Make segmentation into nuclei depending upon segmentation method
+    # tiers in annotation TextGrid file
+        phone_tier_in = 1	; default location
+    # create TextGrid nucleiID
+        phone_tier = 1
+        dip_tier = 2
+        nucleus_tier = 3
+        syllable_tier = 4
+        vuv_tier = 5
+        discontinuity_tier = 6
+        safe_tier = 7
+        pointer_tier = 8
+        speaker_tier = 9
+        creak_tier = 10
+        settings_tier = 11
+        hesitation_tier = 12
+        polytonia_tier = 0	; may be added later for polytonia_annotation
+        boundary_tier = 0	; may be added later for automatic boundary detection
+        stress_tier = 0		; may be added later for stress_annotation
+        .n = 12
+        .tiers$ = "phone dip nucleus syll vuv discont safe pointer speaker creak settings hesitation"
+        .point_tiers$ = "dip discont"
+        if (boundary_annotation)
+           .tiers$ += " boundary-auto"
+           .point_tiers$ += " boundary-auto"
+           .n += 1
+           boundary_tier = .n
+        endif
+        if (polytonia_annotation)
+           .tiers$ += " polytonia"
+           .n += 1
+           polytonia_tier = .n
+        endif
+        if (stress_annotation)
+           .tiers$ += " stress"
+           .n += 1
+           stress_tier = .n
+        endif
+        nucleiID = Create TextGrid: signal_start, signal_finish, .tiers$, .point_tiers$
+        Rename: "nucl"
+		nuclei_available = 1
+    # copy VUV decision from vuvgrid to nuclei grid
+        @copy_tier: vuvgridID, 1, nucleiID, vuv_tier
+        removeObject: vuvgridID
+
+
+   if (segfile_available) ; and not internal data format available
+      @debug_msg: "get_segmentation: segfile available"
+      @gr_printline: "Copying annotation tiers..."
+      @copy_tiers_from_segmentation_textgrid
+   endif
+
+   if (not speaker_available)
+      if (fileReadable (speakerfile$))
+         @msg: "Reading speaker information from 'speakerfile$'"
+         tmpID = Read from file: speakerfile$
+         @tier_number_by_name: tmpID, "^[Ss]peaker$"
+         if (result > 0)
+            @copy_tier: tmpID, result, nucleiID, speaker_tier
+            speaker_available = 1
+         else
+            @msg: "No speaker tier found in 'speakerfile$'" 
+         endif
+         removeObject: tmpID
+      endif
+   endif
+
+   if (not creak_available)
+      if (fileReadable (creakfile$))
+         @msg: "Reading 'creakfile$'" 
+         tmpID = Read from file: creakfile$
+         @tier_number_by_name: tmpID, "^[Cc]reaky?$"
+         if (result > 0)
+            @msg: "Reading creak information from tier 'result' of 'creakfile$'"
+            @copy_tier: tmpID, result, nucleiID, creak_tier
+            creak_available = 1
+         endif
+         removeObject: tmpID
+      endif
+   endif
+
+   if (corpus$ = "cprom" or corpus$ = "rhapsodie")
+         @tier_number_by_name: segmentationID, "^contour$"
+         if (result)
+            @grid_append_tier: segmentationID, result, "nucleiID"
+         endif
+         @tier_number_by_name: segmentationID, "^prom$"
+         if (result)
+            @grid_append_tier: segmentationID, result, "nucleiID"
+         endif
+   endif
+
+   if (needs_phon_tier and not phones_available)
+      @fatal_error: "Cannot find phoneme tier (named phon) in annotation TextGrid"
+   endif
+   if (needs_syll_tier and not syllables_available)
+      @fatal_error: "Cannot find syllable tier (named syll) in annotation TextGrid"
+   endif
+
+   @msg: "Calculating actual segmentation. Method='segmentation_name$'..."
+   if (segm_type != segm_extern)
+      @make_segmentation: segm_type, t1s, t2s, nucleiID, mindiff
+   else		; copy consulted external segmentation in tier "segm" of file to nucleus tier of object nucleiID 
+      @tier_get: segmentationID, "^segm$", "tier_in", "Cannot find segmentation tier (named segm) in segmentation TextGrid", 1
+      @copy_tier: segmentationID, tier_in, nucleiID, nucleus_tier
+      selectObject: nucleiID
+      .n = Get number of intervals: nucleus_tier
+      for .j from 1 to .n
+         label$ = Get label of interval: nucleus_tier, .j
+         @is_vowel: label$
+         if (is_vowel)
+            Set interval text: nucleus_tier, .j, "a"
+         endif
+      endfor
+   endif
+
+   @safe_nuclei: t1s, t2s
+   nrof_nuclei_analysed = result
+
+  # Store analysis, segmentation and stylization settings in nucleiID TextGrid 
+    selectObject: nucleiID
+    Set interval text: settings_tier, 1, "File='basename$' SEG='segmentation_name$' t1='t1s' t2='t2s' " +
+      ... "GT='glissando' GT_low='glissando_low' ADAPT='adaptive_glissando' DG='diffgt' MINTS='mindur_ts' MINPAUSE='mindur_pause_gap'"
+
+  # prepare for Polytonia analysis
+    if (polytonia_annotation)
+       selectObject: nucleiID
+       Remove tier: polytonia_tier		; is empty tier when object is created
+       if (segm_type == segm_msyllvow or segm_type == segm_msyllpeak or segm_type == segm_mrhyme)	
+          ; use syllable boundaries for tonal labels
+          .src_tier = syllable_tier
+       elsif (segm_type == segm_vnucl and segfile_available and syllables_available)
+          .src_tier = syllable_tier
+       else
+          .src_tier = nucleus_tier
+       endif
+       Duplicate tier: .src_tier, polytonia_tier, "polytonia"
+       @tier_merge_intervals_except: nucleiID, polytonia_tier, "a"
+       @tier_clear_text: nucleiID, polytonia_tier
+    endif
+    if (stress_annotation)
+       if (segm_type == segm_msyllvow or segm_type == segm_msyllpeak or segm_type == segm_mrhyme)
+          @tier_replace2: nucleiID, syllable_tier, nucleiID, stress_tier
+       elsif (segm_type == segm_vnucl and segfile_available and syllables_available)
+          @tier_replace2: nucleiID, syllable_tier, nucleiID, stress_tier
+       else
+          @tier_replace2: nucleiID, nucleus_tier, nucleiID, stress_tier
+       endif
+       @tier_clear_text: nucleiID, stress_tier
+    endif
+   endif ; not segmentation available
+   @debug_msg: "get_segmentation: exit"
+endproc
+
+
+procedure read_nuclei_file_interactive_mode
+; Read settings and tiers from saved nuclei file into nucleiID TextGrid:
+   if (task == task_interactive)
       if (not fileReadable (nuclfile$))
          @gr_printline: "Cannot find internal data TextGrid file <'nuclfile$'>"
       else
@@ -1886,94 +2086,45 @@ procedure get_segmentation: method
             removeObject: tmpID
          endif
       endif ; nuclfile found
-;@gr_printline: "segmentation_available='segmentation_available' reuse_nucl='reuse_nucl' nr='nrof_nuclei_analysed'"
-   endif ; task_interactive
-
-   if (not segmentation_available)
-       @debug_msg: "get_segmentation: segmentation not available"
-# Make segmentation into nuclei depending upon segmentation method
-    # tiers in annotation TextGrid file
-        phone_tier_in = 1	; default location
-    # create TextGrid nucleiID
-        phone_tier = 1
-        dip_tier = 2
-        nucleus_tier = 3
-        syllable_tier = 4
-        vuv_tier = 5
-        discontinuity_tier = 6
-        safe_tier = 7
-        pointer_tier = 8
-        speaker_tier = 9
-        creak_tier = 10
-        settings_tier = 11
-        hesitation_tier = 12
-        polytonia_tier = 0	; may be added later for polytonia_annotation
-        boundary_tier = 0	; may be added later for automatic boundary detection
-        stress_tier = 0		; may be added later for stress_annotation
-        .n = 12
-        .tiers$ = "phone dip nucleus syll vuv discont safe pointer speaker creak settings hesitation"
-        .point_tiers$ = "dip discont"
-        if (boundary_annotation)
-           .tiers$ += " boundary-auto"
-           .point_tiers$ += " boundary-auto"
-           .n += 1
-           boundary_tier = .n
-        endif
-        if (polytonia_annotation)
-           .tiers$ += " polytonia"
-           .n += 1
-           polytonia_tier = .n
-        endif
-        if (stress_annotation)
-           .tiers$ += " stress"
-           .n += 1
-           stress_tier = .n
-        endif
-        nucleiID = Create TextGrid: signal_start, signal_finish, .tiers$, .point_tiers$
-        Rename: "nucl"
-		nuclei_available = 1
-    # copy VUV decision from vuvgrid to nuclei grid
-        @copy_tier: vuvgridID, 1, nucleiID, vuv_tier
-        removeObject: vuvgridID
+   endif
+endproc
 
 
-   if (segfile_available) ; and not internal data format available
-      @debug_msg: "get_segmentation: segfile available"
-      @gr_printline: "Copying annotation tiers..."
-      @tier_number_by_name: segmentationID, "^phon"
-      if (variableExists ("corpus$") and variableExists ("corpus_tier_phon$"))
-         if (length (corpus_tier_phon$))
-            @tier_number_by_name: segmentationID, "^'corpus_tier_phon$'$"
-            if (result = 0)
-               @msg: "Cannot find phoneme tier named <'corpus_tier_phon$'>"
-            endif
+procedure copy_tiers_from_segmentation_textgrid
+; Copy tiers (phon, syll, speaker, words, creak, hes) from segmentation TextGrid to nucleiID 
+   @tier_number_by_name: segmentationID, "^phon"
+   # The following if-block may override default name of phoneme tier
+   if (variableExists ("corpus$") and variableExists ("corpus_tier_phon$"))
+      if (length (corpus_tier_phon$))
+         @tier_number_by_name: segmentationID, "^'corpus_tier_phon$'$"
+         if (result = 0)
+            @msg: "Cannot find phoneme tier named <'corpus_tier_phon$'>"
          endif
       endif
-      if (result)	; found tier dedicated to phonemes
-         phone_tier_in = result
-         @msg: "Using phonetic alignment from tier named <'result2$'>"
-         phones_available = 1
-      else
-;         assume tier 1 contains phonetic alignment
-;         .tiername$ = Get tier name: 1
-;         @msg: "Assuming phonetic alignment in tier 1 named <'.tiername$'>"
-         phone_tier_in = 0	
-         phones_available = 0
-         @msg: "Cannot find tier with phonetic alignment"
-      endif
-      if (phones_available)
-         @tier_replace: segmentationID, phone_tier_in, nucleiID, phone_tier, "nucleiID"
-         selectObject: nucleiID
-         Set tier name: phone_tier, "phone"
-      endif
+   endif
+   if (result)	; found tier dedicated to phonemes
+      phone_tier_in = result
+      @msg: "Using phonetic alignment from tier named <'result2$'>"
+      phones_available = 1
+   else
+      phone_tier_in = 0	
+      phones_available = 0
+      @msg: "Cannot find tier with phonetic alignment"
+   endif
+   if (phones_available)
+      @tier_replace: segmentationID, phone_tier_in, nucleiID, phone_tier, "nucleiID"
+      selectObject: nucleiID
+      Set tier name: phone_tier, "phone"
+   endif
 
-      @tier_number_by_name: segmentationID, "^syll"
-      if (variableExists ("corpus$") and variableExists ("corpus_tier_syll$"))
-         if (length (corpus_tier_syll$))
-            @tier_number_by_name: segmentationID, "^'corpus_tier_syll$'$"
-         endif
+   @tier_number_by_name: segmentationID, "^syll"
+   # The following if-block may override default name of syllable tier
+   if (variableExists ("corpus$") and variableExists ("corpus_tier_syll$"))
+      if (length (corpus_tier_syll$))
+        @tier_number_by_name: segmentationID, "^'corpus_tier_syll$'$"
       endif
-      if (result and segm_type <> segm_asyll)
+   endif
+   if (result and segm_type <> segm_asyll)
       ; In segm_asyll, the syllable tier is used for pseudo-syllables and should not be used for true syllables.
          syll_tier_in = result
          @msg: "Using syllable alignment from tier named <'result2$'>"
@@ -1982,41 +2133,49 @@ procedure get_segmentation: method
 ;         selectObject: nucleiID
 ;         Set tier name... syllable_tier syll
          syllables_available = 1
-      endif
+   endif
 
-      @tier_number_by_name: segmentationID, "^[Ss]peaker$"
-      if (variableExists ("corpus$") and variableExists ("corpus_tier_speaker$"))
-         if (length (corpus_tier_speaker$))
-            @tier_number_by_name: segmentationID, "^'corpus_tier_speaker$'$"
-         endif
+   @tier_number_by_name: segmentationID, "^[Ss]peaker$"
+   # The following if-block may override default name of speaker tier
+   if (variableExists ("corpus$") and variableExists ("corpus_tier_speaker$"))
+      if (length (corpus_tier_speaker$))
+         @tier_number_by_name: segmentationID, "^'corpus_tier_speaker$'$"
       endif
-      if (result)
-         speaker_tier_in = result
-         @msg: "Using speaker information from tier named <'result2$'>"
-         if (corpus$ = "rhapsodie") 
-            @copy_tier_tweeked: segmentationID, speaker_tier_in, nucleiID, speaker_tier
-         else
-            @copy_tier: segmentationID, speaker_tier_in, nucleiID, speaker_tier
-         endif
-         speaker_available = 1	; speaker tier available
-      else			; input segmentation textgrid does not contain speaker tier 
-         selectObject: nucleiID
-         Set interval text: speaker_tier, 1, "ANON"
+   endif
+   if (result)
+      speaker_tier_in = result
+      @msg: "Using speaker information from tier named <'result2$'>"
+      if (corpus$ = "rhapsodie") 
+         @copy_tier_tweeked: segmentationID, speaker_tier_in, nucleiID, speaker_tier
+      else
+         @copy_tier: segmentationID, speaker_tier_in, nucleiID, speaker_tier
       endif
+      speaker_available = 1	; speaker tier available
+   else			; input segmentation textgrid does not contain speaker tier 
+      selectObject: nucleiID
+      Set interval text: speaker_tier, 1, "ANON"
+   endif
 
-      @tier_number_by_name: segmentationID, "^[Cc]reaky?$"
-      if (result)
-         @msg: "Using creak information from tier named <'result2$'> of <'segfile$'>"
-         @copy_tier: segmentationID, result, nucleiID, creak_tier
-         creak_available = 1
-      endif
-      word_tier_in = 0
+   @tier_number_by_name: segmentationID, "^[Cc]reaky?$"
+   if (result)
+      @msg: "Using creak information from tier named <'result2$'> of <'segfile$'>"
+      @copy_tier: segmentationID, result, nucleiID, creak_tier
+      creak_available = 1
+   endif
 
-      @tier_number_by_name: segmentationID, "^words?$"
-      if (result)
-         word_tier_in = result
+   word_tier_in = 0
+   @tier_number_by_name: segmentationID, "^words?$"
+   # The following if-block may override default name of word tier
+   if (variableExists ("corpus$") and variableExists ("corpus_tier_word$"))
+      if (length (corpus_tier_word$))
+         @tier_number_by_name: segmentationID, "^'corpus_tier_word$'$"
       endif
+   endif
+   if (result)
+      word_tier_in = result
+   endif
 
+   if (segm_type <> segm_asyll)	; syllable_tier will be used for storing asyll intervals
       @tier_number_by_name: segmentationID, "^hes$"
       if (result)
          hesitation_tier_in = result
@@ -2028,106 +2187,8 @@ procedure get_segmentation: method
          @tier_clear_text: nucleiID, hesitation_tier
       endif
    endif
-
-   if (not speaker_available)
-      if (fileReadable (speakerfile$))
-         @msg: "Reading speaker information from 'speakerfile$'"
-         tmpID = Read from file: speakerfile$
-         @tier_number_by_name: tmpID, "^[Ss]peaker$"
-         if (result > 0)
-            @copy_tier: tmpID, result, nucleiID, speaker_tier
-            speaker_available = 1
-         else
-            @msg: "No speaker tier found in 'speakerfile$'" 
-         endif
-         removeObject: tmpID
-      endif
-   endif
-
-   if (not creak_available)
-      if (fileReadable (creakfile$))
-         @msg: "Reading 'creakfile$'" 
-         tmpID = Read from file: creakfile$
-         @tier_number_by_name: tmpID, "^[Cc]reaky?$"
-         if (result > 0)
-            @msg: "Reading creak information from tier 'result' of 'creakfile$'"
-            @copy_tier: tmpID, result, nucleiID, creak_tier
-            creak_available = 1
-         endif
-         removeObject: tmpID
-      endif
-   endif
-
-   if (corpus$ = "cprom" or corpus$ = "rhapsodie")
-         @tier_number_by_name: segmentationID, "^contour$"
-         if (result)
-            @grid_append_tier: segmentationID, result, "nucleiID"
-         endif
-         @tier_number_by_name: segmentationID, "^prom$"
-         if (result)
-            @grid_append_tier: segmentationID, result, "nucleiID"
-         endif
-   endif
-
-   if (needs_phon_tier and not phones_available)
-      @fatal_error: "Cannot find phoneme tier (named phon) in annotation TextGrid"
-   endif
-   if (needs_syll_tier and not syllables_available)
-      @fatal_error: "Cannot find syllable tier (named syll) in annotation TextGrid"
-   endif
-
-   @msg: "Calculating actual segmentation. Method='segmentation_name$'..."
-   if (segm_type != segm_extern)
-      @make_segmentation: segm_type, t1s, t2s, nucleiID, mindiff
-   else		; copy consulted external segmentation in tier "segm" of file to nucleus tier of object nucleiID 
-      @tier_get: segmentationID, "^segm$", "tier_in", "Cannot find segmentation tier (named segm) in segmentation TextGrid", 1
-      @copy_tier: segmentationID, tier_in, nucleiID, nucleus_tier
-      selectObject: nucleiID
-      .n = Get number of intervals: nucleus_tier
-      for .j from 1 to .n
-         label$ = Get label of interval: nucleus_tier, .j
-         @is_vowel: label$
-         if (is_vowel)
-            Set interval text: nucleus_tier, .j, "a"
-         endif
-      endfor
-   endif
-
-   @safe_nuclei: t1s, t2s
-   nrof_nuclei_analysed = result
-
-   s$ = "File='basename$' SEG='segmentation_name$' t1='t1s' t2='t2s' GT='glissando' GT_low='glissando_low' ADAPT='adaptive_glissando' DG='diffgt' MINTS='mindur_ts' MINPAUSE='mindur_pause_gap'"
-   selectObject: nucleiID
-   Set interval text: settings_tier, 1, s$
-
-  # prepare for Polytonia analysis
-    if (polytonia_annotation)
-       selectObject: nucleiID
-       Remove tier: polytonia_tier		; is empty tier when object is created
-       if (segm_type == segm_msyllvow or segm_type == segm_msyllpeak or segm_type == segm_mrhyme)	
-          ; use syllable boundaries for tonal labels
-          .src_tier = syllable_tier
-       elsif (segm_type == segm_vnucl and segfile_available and syllables_available)
-          .src_tier = syllable_tier
-       else
-          .src_tier = nucleus_tier
-       endif
-       Duplicate tier: .src_tier, polytonia_tier, "polytonia"
-       @tier_clear_text: nucleiID, polytonia_tier
-    endif
-    if (stress_annotation)
-       if (segm_type == segm_msyllvow or segm_type == segm_msyllpeak or segm_type == segm_mrhyme)
-          @tier_replace2: nucleiID, syllable_tier, nucleiID, stress_tier
-       elsif (segm_type == segm_vnucl and segfile_available and syllables_available)
-          @tier_replace2: nucleiID, syllable_tier, nucleiID, stress_tier
-       else
-          @tier_replace2: nucleiID, nucleus_tier, nucleiID, stress_tier
-       endif
-       @tier_clear_text: nucleiID, stress_tier
-    endif
-   endif ; not segmentation available
-   @debug_msg: "get_segmentation: exit"
 endproc
+
 
 
 procedure clipPitchTier: objectID, .ymin, .ymax, .xmin, .xmax
@@ -2917,7 +2978,7 @@ procedure calculate_pitch: .cmda$
    call option_get real f0min= minimum_pitch 0 '.cmda$'
    call option_get real f0max= maximum_pitch 450 '.cmda$'
 
-   if (variableExists ("corpus$") and length (corpus$) and variableExists ("corpus_home$"))
+   if (variableExists ("corpus$") and variableExists ("corpus_home$"))
       if (variableExists ("corpus_subdir_sound$"))
          inputfname$ = corpus_home$ + corpus_subdir_sound$ + inputfname$
       else
@@ -2940,11 +3001,13 @@ procedure calculate_pitch: .cmda$
       removeObject: soundID, pitchID
    endfor
    removeObject: filelistID
+   @msg: "Batch command calculate_pitch: Ready"
    @debug_msg: "calculate_pitch: exit" 
 endproc
 
 
-# arguments: name, default
+# Batch command "prosogram_variants"
+# arguments: option_name, default_value
 #	file=		""		; input file of files specified by a regular expression
 #	time_step=	0.005
 #	f0min=		0		; lower value for F0 detection - f0min=0 selects auto pitch range detection
@@ -2977,12 +3040,16 @@ endproc
 #	tg_bound=	yes/no	; show vertical boundaries of tier intervals in textgrid (default is yes in rich mode and no in light mode
 #	portee=		yes		; show portee (horizontal ST calibration lines)
 #	traject=	no		; show intrasyllab up/down and intersyllab pitch intervals
+#	hesit=		no		; show hesitations
+#	hesit_method=phon+pros	; set method for hesitation detection
+#	rhythm=		no		; show rhythm
 
 
 procedure prosogram_variants: .cmda$
 ; @logging: "reset debug timed", "_log.txt"
    @debug_msg: "prosogram_variants: entry, command=<'.cmda$'>"
    @initialization_main
+   task = task_prosogram
    auto_pitchrange = 1		; automatic pitch range adjustment in plot
    ; draw_pitch_target_values = 0
    outputmode$ = "Fill"
@@ -3018,6 +3085,7 @@ procedure prosogram_variants: .cmda$
    call option_get real jpegq= jpegq 75 '.cmda$'
    call option_get boolean save= save_intermediate_data no '.cmda$'
    call option_get boolean polytonia= polytonia_annotation no '.cmda$'
+   call option_get boolean boundaries= boundary_annotation no '.cmda$'
    call option_get boolean cleanup= do_cleanup yes '.cmda$'
    if (glissando < 0) 
       adaptive_glissando = 1
@@ -3031,7 +3099,6 @@ procedure prosogram_variants: .cmda$
    else
       viewsize$ = "compact"
    endif
-   ; if (variableExists ("corpus$") and length (corpus$) and variableExists ("corpus_home$"))
    if (variableExists ("corpus_home$"))
       if (variableExists ("corpus_subdir_sound$"))
          inputfname$ = corpus_home$ + corpus_subdir_sound$ + inputfname$
@@ -3054,6 +3121,7 @@ procedure prosogram_variants: .cmda$
    if (save_intermediate_data)
       needs_prosodic_profile = 1
    endif
+
    @initialization_multiple_files
    ; The following lines override some variables initialized by @task_flags and @initialization_multiple_files
    call option_get boolean volatile= volatile no '.cmda$'
@@ -3081,6 +3149,10 @@ procedure prosogram_variants: .cmda$
    call option_get real targets= draw_pitch_target_values 0 '.cmda$'
    call option_get boolean traject= show_trajectories no '.cmda$'
    call option_get boolean grey= greyscale no '.cmda$'
+   call option_get boolean hesit= show_hesitations no '.cmda$'
+   call option_get boolean hesit_anno= hesitation_annotation no '.cmda$'
+   call option_get word hesit_method= hesitation_method automatic '.cmda$'
+   call option_get boolean rhythm= show_rhythm no '.cmda$'
    @debug_msg: "prosogram_variants: wide='wide' rich='rich' pitchrange='show_pitchrange' adapative='adaptive_glissando'"
    for iFile to nrofFiles		; both are global variables ; see process_one_input_file
       selectObject: filelistID
@@ -3096,26 +3168,29 @@ endproc
 
 procedure prosogram: .cmda$
    @msg: " 'newline$'Batch command prosogram"
-   task = task_prosogram
-   polytonia_annotation = 0
-   boundary_annotation = 0
    @prosogram_variants: .cmda$
    @msg: "Batch command prosogram: Ready"
 endproc
 
 
 procedure polytonia: .cmda$
-   task = task_prosogram
+   @msg: " 'newline$'Batch command polytonia"
    @prosogram_variants: .cmda$ + " polytonia=yes"
    @msg: "Batch command polytonia: Ready"
 endproc
 
 
 procedure detect_boundaries: .cmda$
-   task = task_prosogram
-   boundary_annotation = 1
-   @prosogram_variants: .cmda$
-   boundary_annotation = 0
+   @msg: " 'newline$'Batch command detect_boundaries"
+   @prosogram_variants: .cmda$ + " boundaries=yes"
+   @msg: "Batch command detect_boundaries: Ready"
+endproc
+
+
+procedure hesitations: .cmda$
+   @msg: " 'newline$'Batch command detect_hesitations"
+   @prosogram_variants: .cmda$ + " hesit_anno=yes"
+   @msg: "Batch command detect_hesitations: Ready"
 endproc
 
 
@@ -3213,7 +3288,7 @@ procedure calculate_duration_data: .cmda$
       call msg No input files found for <'filespec$'>
    endif
    ; prepare default for outputfile
-      call fname_parts 'filespec$'
+      @fname_parts: filespec$
       indir$ = result4$
       .s$ = indir$ + "_dur_'unit$'.txt"
       call option_get word out= outfname "'.s$'" '.cmda$'
@@ -3388,65 +3463,91 @@ procedure validate_tier: .cmda$
 endproc
 
 
-procedure find_nucleus: .t1, .t2
-; Find valid nucleus in time range <.t1>..<.t2>
-; Returns index of nucleus (in nucleus_tier) in variable <result> or 0 if not found
+procedure find_nucleus: .type$, .t1, .t2, .forward
+; Find nucleus of given <.type$> in time range <.t1>..<.t2>
+; <.type$>		"a" = valid_nucleus, "-" = rejected nucleus
+; <.forward>	search from .t1 to .t2, otherwise from .t2 to .t1
+; Return index of nucleus (in nucleus_tier) in variable <result> or 0 if not found
    result = 0
    selectObject: nucleiID
    .endt = Get end time
+   .startt = Get start time
    .endt = min (.endt, .t2)
-   while (.t1 < .endt and result == 0)
-      .i = Get interval at time: nucleus_tier, .t1
+   .startt = max (.startt, .t1)
+   if (.forward)
+      .t = .t1
+   else
+      .t = .t2 - 0.002
+   endif
+   while ((.forward and .t < .endt) or (.forward == 0 and .t > .startt) and result == 0)
+      .i = Get interval at time: nucleus_tier, .t
       .s$ = Get label of interval: nucleus_tier, .i
-      if (.s$ = "a")		; valid_nucleus
+      if (.s$ == .type$)
          result = .i
       endif
-      .t1 = Get end time of interval: nucleus_tier, .i
+      if (.forward)
+         .t = Get end time of interval: nucleus_tier, .i
+      else
+         .t = .startt
+         if (.i > 1)
+            .t = Get start time of interval: nucleus_tier, .i-1
+         endif
+      endif
    endwhile
 endproc
 
 
 procedure detect_hesitations: .t1a, .t2a, .method$
 # Detect hesitations, either from hesitation tier in TextGrid of from acoustic cues and phoneme identity.
-# <method>
-#	"automatic"	use information from phoneme tier and prosodic features (dur >= 0.3 && intrasyll <= 0 && intrasyll > -3 ST)
-#	"annotation"	copy info in hesitation_tier, where a hesitation is marked as "H" 
-   @debug_msg: "detect_hesitations: entry"
-   if (.method$ = "automatic")
-   ; Detect hesitation from various sources of information: annotation and prosodic features
-   ; - from phoneme tier containing "\oe", "\o/", "9", "@" or "2", with additional conditions on duration, slope and pitch interval
-      @intervals_from_time_range: nucleiID, nucleus_tier, .t1a, .t2a,, "first_interval", "last_interval"
+# <.method>
+#	"phon+pros"		use phoneme label and prosodic features (phon_dur >= 0.3 && intrasyll <= 0 && intrasyll > -3 ST)
+#					phoneme is "\oe", "\o/", "9", "@" or "2"
+#	"words"			use word tier from annotation TextGrid, where hesitations are labeled "euh" or "eh"
+#	"none"			don't attempt detection
+#	(not yet) "annotation"	use hesitation tier from annotation TextGrid, where a hesitation is marked as "H" 
+   @debug_msg: "detect_hesitations: entry, method='.method$'"
+
+   if segfile_available and (.method$ = "phon+pros" or .method$ = "words")
+      @intervals_from_time_range: nucleiID, nucleus_tier, .t1a, .t2a, "first_interval", "last_interval"
       for .j from first_interval to last_interval
          selectObject: nucleiID
          @is_nucleus: .j
          if (result)
-            x1 = Get start point: nucleus_tier, .j
-            x2 = Get end point: nucleus_tier, .j
-            xmid = x1 + (x2-x1)/2
-            .s$ = Get label of interval: pointer_tier, .j
-            pj = '.s$'
-            .hesit = 0		; default = no hesitation
-            if (phones_available)
-               @interval_from_time: nucleiID, phone_tier, xmid, "i"
+            .hesit = 0						; default = no hesitation detected
+            .t1 = Get start time of interval: nucleus_tier, .j
+            .t2 = Get end time of interval: nucleus_tier, .j
+            .tmid = .t1 + (.t2-.t1)/2
+            if (.method$ = "phon+pros" and phones_available)
+               @interval_from_time: nucleiID, phone_tier, .tmid, "i"
                .label$ = Get label of interval: phone_tier, i
-               px1 = Get start point: phone_tier, i
-               px2 = Get end point: phone_tier, i
+               .px1 = Get start time of interval: phone_tier, i
+               .px2 = Get end time of interval: phone_tier, i
+               .phon_dur = .px2-.px1
+               .s$ = Get label of interval: pointer_tier, .j
+               .pj = '.s$'
                selectObject: nucldatID
-               intST = Get value: pj, j_intrasyl
-               if (index ("=\o/=\oe=9=2=@=", "='label$'=") and px2-px1 >= 0.3 and intST <= 0 and abs(intST) < 3) 
+               .intST = Get value: .pj, j_intrasyl
+               if (index ("=\o/=\oe=9=2=@=", "='.label$'=") 
+                  ... and .phon_dur >= 0.3 and .intST <= 0 and abs(.intST) < 3) 
                   .hesit = 1
-                  @msg: "detect_hesitations: hesitation detected at 'xmid:3'"
                endif
+            elsif (.method$ = "words" and word_tier_in > 0)
+               @interval_from_time: segmentationID, word_tier_in, .tmid, "jw"
+               .label$ = Get label of interval: word_tier_in, jw
+               if (index ("=euh=eh=", "='.label$'=")) 
+                  .hesit = 1
+               endif
+            elsif (.method$ = "annotation" and hesitation_available)
             endif
             if (.hesit)
-               @interval_from_time: nucleiID, hesitation_tier, xmid, "i"
-               selectObject: nucleiID
+               @msg: "detect_hesitations: hesitation detected at '.t1:3', method='.method$'"
+               @interval_from_time: nucleiID, hesitation_tier, .tmid, "i"
                Set interval text: hesitation_tier, i, "H"
             endif
          endif
       endfor
       hesitation_available = 1
-   endif	; automatic
+   endif
 
    ; Copy info in hesitation tier to column of nucldatID
    selectObject: nucldatID
@@ -3611,4 +3712,22 @@ procedure tier_disable_textstyle: .gridID, .tier
    endfor
 endproc
 
+
+procedure tier_merge_intervals_except: .gridID, .tier, .except$
+; Merge adjacent intervals other than those with label <.except$>
+   selectObject: .gridID
+   .n = Get number of intervals: .tier
+   .i = 1
+   while (.i < .n)
+      .label1$ = Get label of interval: .tier, .i
+      .label2$ = Get label of interval: .tier, .i+1
+      if (.label1$ <> .except$ and .label2$ <> .except$)
+         Remove right boundary: .tier, .i
+         ; Set interval text: .tier, .i, ""
+         .n -= 1
+      else
+         .i += 1
+      endif
+   endwhile
+endproc
 

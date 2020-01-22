@@ -1,13 +1,35 @@
 # segment.praat ---   
 # This file is included (indirectly) by prosogram.praat. It isn't a stand-alone script. Use prosogram.praat instead.
 # Author: Piet Mertens
-# Last modification: 2019-04-25
+
+# Last modification: 2019-12-07
 # 2018-03-31	added segmentation method "specsim"
 # 2018-04-01	added segmentation method "pitchchange"
 # 2018-08-09	added segmentation method "pitchterrace"
 # 2019-01-29	debugged voiced_portions
 # 2019-02-12	changed to new Praat syntax
 # 2019-02-12	handle double length diacritic in @is_vowel
+# 2019-12-04	changed @get_boundary
+
+
+# Procedure hierarchy
+# make_segmentation
+#   local_peaks_vowels
+#   convexhull
+#   local_peaks_loudness
+#   local_peaks_duo
+#   pseudo_syllables
+#   local_peaks_syllables_vowels
+#   local_peaks_syllables
+#   local_peaks_rhyme
+#
+#      get_local_peak
+#         is_unvoiced_region
+#         get_boundary
+#         voiced_intersection
+#         add_boundary
+#         set_boundary_label
+
 
 
 procedure make_segmentation: segm_method, .at1, .at2, destID, mindiff
@@ -366,8 +388,8 @@ procedure pseudo_syllables: .dstID, .intID, .ifilID, .at1, .at2, .mindiff
       selectObject: .dstID
       .j = Get interval at time: syllable_tier, .time
       .label$ = Get label of interval: syllable_tier, .j
-      .x1 = Get start point: syllable_tier, .j
-      .x2 = Get end point: syllable_tier, .j
+      .x1 = Get start time of interval: syllable_tier, .j
+      .x2 = Get end time of interval: syllable_tier, .j
       .nexttime = .x2
       if (.label$ = "a")
          @convexhull: .dstID, dip_tier, .ifilID, .x1, .x2, .mindiff		; major dips are stored as points on dip tier
@@ -862,36 +884,77 @@ procedure set_boundary_label: .destID, .tier, .xleft, .xright, .label$
 endproc
 
 
-procedure get_boundary: paramID, peaktime, xlimit, incr, diff
+procedure get_boundary_old: .paramID, .peaktime, .xlimit, .incr, .diff
+# Get time of left or right boundary.
+# <.peaktime>	time of peak in interval
+# <.xlimit>		time limit for left or right boundary
+# <.incr>		-1 for left boundary, 1 for right boundary
+# <.diff>		max difference between peak and value at boundary
+# Returns time of left or right boundary in <result>
    result = 0
-   select paramID
-   peakframe = Get frame from time... peaktime
-   i = round (peakframe)
-   max = Get value in frame... peakframe
-   limit_ = Get frame from time... xlimit
-   limit = round (limit_)
-;@msg: "get_boundary: peaktime='peaktime:5' xlimit='xlimit:5' limit_='limit_' round limit='limit'"
-   ok = 1
-   while (ok)
-      nexti = i + incr
-      iy = Get value in frame... i
-      if ((incr < 0 and nexti < limit) or (incr > 0 and nexti > limit) or (max-iy > diff))
-         ok = 0
+   selectObject: .paramID
+   .peakframe = Get frame number from time: .peaktime
+   .i = round (.peakframe)
+   .max = Get value in frame: .i
+   .limit = Get frame number from time: .xlimit
+   .limit = round (.limit)
+;@msg: "get_boundary: t='.peaktime:4' xlimit='.xlimit:5' limit='.limit'"
+   .ok = 1
+   while (.ok)
+      .nexti = .i + .incr
+      .y = Get value in frame: .i
+      if ((.incr < 0 and .nexti < .limit) or (.incr > 0 and .nexti > .limit) or (.max-.y > .diff))
+         .ok = 0
       else
-         i = nexti
-         if (incr < 0 and i <= 0)
-            ok = 0
-            i = 1
+         .i = .nexti
+         if (.incr < 0 and .i <= 0)
+            .ok = 0
+            .i = 1
          endif
       endif
    endwhile
-   result = Get time from frame... i
-   if (incr > 0)	; frame is real number -> rounding errors
-      result = min (result, xlimit)
+   result = Get time from frame: .i
+   if (.incr > 0)	; frame is real number -> rounding errors
+      result = min (result, .xlimit)
    else
-      result = max (result, xlimit)
+      result = max (result, .xlimit)
    endif
 endproc
+
+
+procedure get_boundary: .paramID, .peaktime, .xlimit, .incr, .diff
+# Get time of left or right boundary.
+# <.peaktime>	time of peak in interval
+# <.xlimit>		time limit for left or right boundary
+# <.incr>		-1 for left boundary, 1 for right boundary
+# <.diff>		max difference between peak and value at boundary
+# Returns time of left or right boundary in <result>
+   selectObject: .paramID
+   .dx = Get time step
+   .t = .peaktime
+   .max = Get value at time: .t, "Nearest"
+   .ok = 1
+   while (.ok)
+      .y = Get value at time: .t, "Nearest"
+      .tn = .t + (.incr * .dx)
+      if ((.incr < 0 and .tn < .xlimit) or (.incr > 0 and .tn > .xlimit) or (.max-.y > .diff))
+         .ok = 0
+      else
+         .t = .tn
+         if (.incr < 0 and .t <= 0)
+            .ok = 0
+            .t = 0
+         endif
+      endif
+   endwhile
+;@msg: "get_boundary: tp='.peaktime:4' xlimit='.xlimit:5' t='.t:5' incr='.incr'"
+   if (.incr > 0)
+      result = min (.t, .xlimit)
+   else
+      result = max (.t, .xlimit)
+   endif
+endproc
+
 
 
 procedure tier_point_to_interval: .gridID, .ptier, .itier, .t1, .t2
@@ -910,7 +973,7 @@ endproc
 
 
 procedure is_unvoiced_region: .gridID, .x1, .x2
-# returns 1 if <.x1> and <.x2> are within same unvoiced interval of the VUV grid
+# Returns 1 in variable <result> if <.x1> and <.x2> are within same unvoiced interval of the VUV grid
    @debug_msg: "is_unvoiced_region: entry"
    result = 0
    selectObject: .gridID
@@ -966,7 +1029,7 @@ procedure voiced_intersection: .x1, .x2
    .i1 = Get interval at time: vuv_tier, .x1
    .i2 = Get interval at time: vuv_tier, .x2
    if (.i1 == 0 or .i2 == 0)	; peeking outside analysed signal; return unvoiced
-      call error_msg voiced_intersection: .i1='.i1' x1='.x1'
+      @error_msg: "voiced_intersection: .i1='.i1' x1='.x1'"
    else
       while (.i1 <= .i2)
          .label$ = Get label of interval: vuv_tier, .i1
@@ -990,7 +1053,7 @@ endproc
 
 
 procedure is_vowel: s$
-# Sets variable <is_vowel> to 1 if s$ is a vowel (SAMPA or Praat conventions) 
+# Sets variable <is_vowel> to 1 if <s$> is a vowel (SAMPA or Praat conventions) 
 # and to 0 otherwise
    .input$ = s$
    is_vowel = 0

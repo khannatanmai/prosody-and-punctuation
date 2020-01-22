@@ -3,19 +3,8 @@
 # This file is included (indirectly) by prosogram.praat. It isn't a stand-alone script. Use "prosogram.praat" instead.
 # Author: Piet Mertens
 # For documentation see http://sites.google.com/site/prosogram/
-# Last modification: 2019-09-04
+# Last modification: 2019-09-18
 
-# 2017-03-14	added spreadsheet_times_reduced_precision
-# 2017-09-04	added prosodic_profile_summary
-# 2018-02-07	
-# 2018-03-06	disabled prosodic_profile_summary	
-# 2018-03-13	small changes	
-# 2018-08-04	small changes; error message added for undefined intensity in stylize_nucleus
-# 2018-10-15	prosodic_profile_new
-# 2018-10-18	added post-editing of intersyllab values, at speaker turns
-# 2018-10-22	all prosodic attributes (features, measures, metadata) stored in global report table, by speaker 
-# 2018-10-26	added comments 
-# 2018-10-29	added nPVI analyses for data selected by speaker
 # 2018-10-29	extended prosodic profile
 # 2018-10-31	improved handling of octave jumps
 # 2018-11-01	improved handling of undefined pitch frames at nucleus boundaries and inside syllabic nucleus
@@ -35,12 +24,13 @@
 # 2019-05-09	removed variable min_pause_duration, which conflicted with mindur_pause_gap 
 # 2019-09-04	corrected bug in pause duration calculation in @initialize_nucldat 
 # 2019-09-04	corrected bug for stddev of nucleus duration when there's only one syllable in the speech signal 
+# 2019-12-04	improved handling of pauses in @initialize_nucldat
 
 
 # Procedure hierarchy
 #
 # create_table_of_nuclei				create TableOfReal with values for each nucleus
-#   af									(add field) set column label and store column number in named variable 
+#   af									("add field") set column label and store column number in named variable 
 # profile_table_create					create TableOfReal for prosodic profile and associated variables
 # profile_table_prepare				    add lines for speakers in prosodic profile table 
 # profile_table_load					read prosodic profile table from file
@@ -50,12 +40,12 @@
 #   octavejump
 # initialize_nucldat					link TextGrid nucleiID with TableOfReal nucldatID, using pointer_tier in TG
 # stylize_nuclei
-#   calc_vowel_duration					calculate vowel duration for spreadsheet
-#   calc_rhyme_duration					calculate rhyme duration for spreadsheet
-#   calc_localrate
 #   stylize_nucleus
 #      turning_point
 #      slopeSTs							calculate slope in ST/s and audibility (glissando threshold) of pitch change
+#   calc_localrate
+#   calc_vowel_duration					calculate vowel duration for spreadsheet
+#   calc_rhyme_duration					calculate rhyme duration for spreadsheet
 # pitchrange_speakers					calculate statistics of prosodic features per speaker 
 #   calc_nPVI
 # pitchrange_normalized_pitch
@@ -150,7 +140,7 @@ if (use_duration_model)
    @af: "en_rhymedur" ,"j_en_rhymedur"	,"elasticity normalized rhyme duration (only for appropriate segmentation methods)"
 endif
 if (calc_prominence)
-   ; @af: "promL2R1D_f0_mean" ,"j_promL2R1D_f0_mean"	,"prominence of mean pitch (Hz) wrt dynamic left/right context of 2+1 units"
+   @af: "promL2R1D_f0_mean" ,"j_promL2R1D_f0_mean"	,"prominence of mean pitch (Hz) wrt dynamic left/right context of 2+1 units"
    ; @af: "promL2R1D_f0_max"  ,"j_promL2R1D_f0_max"	,"prominence of max pitch (Hz) wrt dynamic left/right context of 2+1 units"
    @af: "promL2R1D_hipitch" ,"j_promL2R1D_hipitch"	,"prominence of max pitch (Hz) wrt dynamic left/right context of 2+1 units"
    @af: "promL2R1D_hipitchST" ,"j_promL2R1D_hipitchST"	,"prominence of max pitch (ST) wrt dynamic left/right context of 2+1 units"
@@ -174,6 +164,8 @@ endif
 if (show_localrate)
    @af: "local_rate_nucl" ,"j_localrate_nucl"	,"local speech rate in complete nuclei per second"
 endif
+   @af: "iso_dur"	,"j_isodur"		,"inter syllable onset duration, for current onset to next onset"
+
    @debug_msg: "create_table_of_nuclei: exit"
 endproc
 
@@ -541,8 +533,7 @@ procedure initialize_nucldat: .at1, .at2
 # 1. Link TextGrid nucleiID and table nucldatID, by storing index of row into pointer tier of TextGrid 
 # 2. Initialize some columns in table nucldatID 
    @debug_msg: "initialize_nucldat: entry"
-   @interval_from_time: nucleiID, nucleus_tier, .at1, "first_interval"
-   @interval_from_time: nucleiID, nucleus_tier, .at2, "last_interval"
+   @intervals_from_time_range: nucleiID, nucleus_tier, .at1, .at2, "first_interval", "last_interval"
 ; Connect TextGrid nucleiID and table nucldatID, by storing index of row into tier of TextGrid 
    selectObject: nucleiID
    nrofnuclei = Get number of intervals: nucleus_tier
@@ -569,7 +560,8 @@ procedure initialize_nucldat: .at1, .at2
          Set value: .row, j_nucldur, .x2-.x1
       endif
    endfor
-   ; Initialize some columns in table nucldatID: vowel duration, syllable duration, rhyme duration 
+
+   ; Initialize some columns in table nucldatID: vowel duration, syllable duration, rhyme duration, hesitation
    selectObject: nucldatID
    .nrows = Get number of rows
    for .row to .nrows
@@ -580,38 +572,64 @@ procedure initialize_nucldat: .at1, .at2
          Set value: .row, j_en_sylldur, 0
          Set value: .row, j_en_rhymedur, 0
       endif
+      Set value: .row, j_hesitation, 0
    endfor
-   ; Initialize some columns in table nucldatID: calculate gap between successive nuclei, locate pauses
+
+   ; Initialize some columns in table nucldatID: locate pauses
    selectObject: nucleiID
    .t0 = Get start time
-   selectObject: nucldatID
    for .j from 1 to nrof_nuclei_analysed			; assign "before_pause" and "pause_dur"
-      Set value: .j, j_before_pause, 0
-      Set value: .j, j_pause_dur, 0
+      selectObject: nucldatID
+      .before_pause = 0
+	  .pause_dur = 0
       .t2 = Get value: .j, j_nucl_t2				; end of current nucleus
       if (.j == nrof_nuclei_analysed)				; last nucleus in speech signal
-         Set value: .j, j_before_pause, 1
-         Set value: .j, j_pause_dur, number(fixed$(signal_finish-.t2, 3))
+         .before_pause = 1
+         .pause_dur = signal_finish-.t2
       else
          .t = Get value: .j+1, j_nucl_t1			; start of next nucleus
-         if (.t-.t2 >= mindur_pause_gap)			; this criterion only affects decision, but not pause duration itself
-            Set value: .j, j_before_pause, 1
-            Set value: .j, j_pause_dur, number(fixed$(.t-.t2, 3))
+         if (.t-.t2 >= mindur_pause_gap)			; potential pause
+            @find_nucleus: "-", .t2, .t, 1			; find rejected nucleus in gap between current nucleus & next valid nuclei
+            if (result)
+               .t3 = Get start time of interval: nucleus_tier, result
+               if (.t3-.t2 >= mindur_pause_gap)		; actual pause
+                  .before_pause = 1
+                  .pause_dur = .t3-.t2
+               endif
+            else
+               .before_pause = 1					; actual pause
+               .pause_dur = .t-.t2
+			endif
          endif
       endif
+      selectObject: nucldatID
+      Set value: .j, j_before_pause, .before_pause
+      Set value: .j, j_pause_dur, number(fixed$(.pause_dur, 3))
    endfor
    for .j from 1 to nrof_nuclei_analysed			; assign "after_pause"
+      selectObject: nucldatID
       .t = Get value: .j, j_nucl_t1
       if (.j > 1)
-         .t3 = Get value: .j-1, j_nucl_t2			; end of previous nucleus
+         .t2 = Get value: .j-1, j_nucl_t2			; end of previous valid nucleus
       else
-         .t3 = .t0 
+         .t2 = .t0 
       endif
-      if (.t-.t3 >= mindur_pause_gap)
-         Set value: .j, j_after_pause, 1
+      .after_pause = 0
+      if (.t-.t2 >= mindur_pause_gap)				; potential pause
+         @find_nucleus: "-", .t2, .t, 0				; find rejected nucleus in gap between current nucleus & prev valid nuclei
+         if (result)
+            .t3 = Get end time of interval: nucleus_tier, result
+            if (.t-.t3 >= mindur_pause_gap)			; actual pause
+               .after_pause = 1
+            endif
+         else
+            .after_pause = 1						; actual pause
+         endif
       else
-         Set value: .j, j_after_pause, 0
+         .after_pause = 0
       endif
+      selectObject: nucldatID
+      Set value: .j, j_after_pause, .after_pause
    endfor
    @debug_msg: "initialize_nucldat: exit"
 endproc
@@ -638,6 +656,8 @@ procedure stylize_nuclei: .t1, .t2
    if (show_localrate)
       @calc_localrate: nucldatID, j_localrate_nucl, 2.5, 2.5
    endif
+   @calc_isodur: nucldatID
+
    @debug_msg: "stylize_nuclei: phones_available='phones_available'"
    if (phones_available and segm_type <> segm_asyll)	; calculate vowel duration for spreadsheet
       @calc_vowel_duration: nucldatID, j_voweldur
@@ -803,12 +823,15 @@ procedure stylize_nucleus: .tier, .i, .prev_nucleus
 ; <.prev_nucleus>	index (of interval in TextGrid) of previous syllabic nucleus (i.e. where label == "a")
    @debug_msg: "stylize_nucleus: entry, i='.i'"
 
+   ; Find row index in nucldatID for nucleus to be stylized
    selectObject: nucleiID
    x1 = Get start time of interval: .tier, .i
    x2 = Get end time of interval: .tier, .i
    .i = Get interval at time: pointer_tier, x1+(x2-x1)/2
    .s$ = Get label of interval: pointer_tier, .i
    .row = number(.s$)		; index of row in table nucldatID
+
+   ; Set adaptive glissando value
    selectObject: nucldatID
    pause_follows = Get value: .row, j_before_pause
    glissando_local = glissando
@@ -816,6 +839,7 @@ procedure stylize_nucleus: .tier, .i, .prev_nucleus
       glissando_local = glissando_low
    endif
 
+   ; Find pitch frame index for start and end of nucleus
    selectObject: pitchID
    .dx = Get time step
    .f = Get frame number from time: x1
@@ -837,10 +861,12 @@ procedure stylize_nucleus: .tier, .i, .prev_nucleus
    endif
 
 
-# Step 1. Find turning points (TP) in contour, by order of importance.
-# A TP is the point where the distance between the actual F0 and the linear fit of F0 values is largest.
-# A TP is kept only if the difference in slope between the parts before and after 
-# the TP exceeds the differential glissando threshold, and if at least 1 of the parts is an audible pitch movement.
+# Step 1. Segmentation of pitch contour into tonal segments.
+# Find turning points (TP) in contour, by order of importance.
+# A TP is the point of largest distance between the raw F0 and the linear fit between F0 values at start and end.
+# A TP is kept only 
+# - if the difference in slope between the parts before and after the TP exceeds the differential glissando threshold, and 
+# - if at least 1 of the parts is an audible pitch movement.
 # When a TP is found, additional TPs are searched for in the left part, until none are found.
 # Then the search continues for the interval between the last TP and the end of the nucleus interval.
    nrofts = 1				; number of tonal segments
@@ -848,16 +874,16 @@ procedure stylize_nucleus: .tier, .i, .prev_nucleus
    Add point: x1, 1
    Add point: x2, 1
    i1 = Get nearest index from time: x1
-   xL = x1				; xL..xR is time interval where TP may be found
+   xL = x1					; xL..xR is time interval where TP may be found
    xR = x2
    repeat
       nrofsplit = 0			; nrof turning points found in repeat loop 
       repeat				; find turning points
          split = 0			; nrof times split at turning point
          @slopeSTs: xL, xR, "g", "aud_A"
-         if (aud_A)
+         if (aud_A)			; time interval contains audible pitch change  
             @turning_point: xL, xR
-            if (maxdiftime >= 0)	; found turning point
+            if (maxdiftime >= 0)	; found a candidate turning point
                if ((maxdiftime - xL >= mindur_ts) and (xR - maxdiftime >= mindur_ts))
                   @slopeSTs: xL, maxdiftime, "g1", "aud_L"
                   @slopeSTs: maxdiftime, xR, "g2", "aud_R"
@@ -871,7 +897,7 @@ procedure stylize_nucleus: .tier, .i, .prev_nucleus
                Add point: maxdiftime, 1
                xR = maxdiftime
                nrofsplit += 1		; turning points inserted in this loop
-               nrofts += 1		; additional tonal segment found
+               nrofts += 1			; additional tonal segment found
             endif
          endif
       until (split = 0)
@@ -944,8 +970,9 @@ procedure stylize_nucleus: .tier, .i, .prev_nucleus
          pv_hi = max (yL, yR)	; initialize pv_hi
          pv_start = yL
       endif
-      Remove point: i+1		; to replace value of point at xR
-      Add point: xR, yR		; set Y value of turning point at xR
+      ; Update Y value of turning point at time xR 
+         Remove point: i+1		; to replace value of point at xR
+         Add point: xR, yR		; set Y value of turning point at xR
       ; Following lines use values after stylization
       intST = 12 * log2 (yR/yL)
       if (aud_A)
@@ -1055,12 +1082,12 @@ endproc
 
 procedure slopeSTs: .t1, .t2, varname1$, varname2$
 # Calculate slope of F0 variation (in ST/s) in time interval <.t1>..<.t2>.
-# Return slope in (global) variable named in <varname1$>
-# Determine whether pitch change is audible (above glissando threshold)
-# Return audibility in variable named in <varname2$>
+# Return slope in global variable named in <varname1$>.
+# Determine whether pitch change is audible, i.e. above glissando threshold.
+# Return audibility in global variable named in <varname2$>.
 # Return values:
-# <slopeSTs>	slope
-# <dist>		pitch interval (in ST)
+#   <slopeSTs>	slope
+#   <dist>		pitch interval (in ST)
    selectObject: pitchID
    .max = Get maximum: .t1, .t2, "Hertz", "None"
    .min = Get minimum: .t1, .t2, "Hertz", "None"
@@ -1084,8 +1111,8 @@ endproc
 
 procedure turning_point: .t1, .t2
 # Find most important turning point.
-# returns <maxdiftime> = time of turning point in time interval <.t1>..<.t2>
-# returns -1 if max difference too small ( < 1 ST ) 
+# Returns: 
+#    <maxdiftime> = time of turning point in time interval <.t1>..<.t2> OR -1 if max difference is too small ( < 1 ST ) 
    selectObject: pitchID
    .dx = Get time step
    .jf1 = Get frame number from time: .t1
@@ -2575,3 +2602,36 @@ procedure table_row_where_col_value_gt: .table, .col, .value, .varname$
    until (.ok or .row > .nrows)
    '.varname$' = .ok
 endproc
+
+
+
+procedure calc_isodur: .table
+; Calculate duration of inter syllable onset
+; Requires nucleus, speaker and pause information
+   @debug_msg: "calc_isodur: entry"
+   selectObject: .table
+   .rows = Get number of rows
+   for .row to .rows			; for each nucleus/syllable in the signal
+      .t1 = Get value: .row, j_nucl_t1
+      .t2 = Get value: .row, j_nucl_t2
+      .sp = Get value: .row, j_speaker_id
+      .pause = Get value: .row, j_before_pause
+      .isodur = .t2-.t1		; default when followed by speaker turn or end-of-signal
+      if (.row < .rows)
+         .t = Get value: .row+1, j_nucl_t1
+         .sp2 = Get value: .row+1, j_speaker_id
+         if (.sp2 == .sp)
+            if (.pause)
+               .isodur = (.t2-.t1)		; + 0.3
+            else
+               .isodur = .t - .t1
+            endif
+         endif
+      elsif (.row == .rows)
+         .isodur = (.t2 - .t1)			; + 0.3
+      endif
+      Set value: .row, j_isodur, .isodur
+   endfor
+   @debug_msg: "calc_isodur: exit"
+endproc
+

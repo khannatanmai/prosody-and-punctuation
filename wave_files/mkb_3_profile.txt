@@ -1,6 +1,6 @@
-Prosodic profile for input file: D:\ssmt_final\wave_files\mkb_3.wav
+Prosodic profile for input file: /Users/khannatanmai/Documents/NLP_Research/Prosody/FinalPresentation/wave_files/mkb_3.wav
 Prosogram version: Prosogram v2.19e, (c) Piet Mertens
-Date (of analysis): Sat Nov 30 12:41:23 2019
+Date (of analysis): Wed Jan 22 17:41:26 2020
 
 Segmentation type: asyll
 Nucleus: 14 nuclei in signal

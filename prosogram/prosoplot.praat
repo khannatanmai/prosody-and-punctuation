@@ -2,7 +2,7 @@
 # Praat include file containing procedures for plotting parameters related to prosody
 # This file is included (indirectly) by prosogram.praat. It isn't a stand-alone script. Use prosogram.praat instead.
 # Author: Piet Mertens
-# Last modification: 2019-07-01
+# Last modification: 2019-12-03
 
 # Procedure hierarchy
 # gr_init							initialize some global variables for graphics modes
@@ -22,7 +22,8 @@
 #     gr_plot_vuv					plot voicing decision
 #     gr_plot_nuclei				plot syllabic nuclei
 #     gr_plot_pitchrange			plot pitch range
-#     gr_plot_feature				plot feature (either a categorical or a numerical variable) of a syllabic nucleus
+#     gr_plot_feature				plot feature (a categorical or a numerical variable) of a syllabic nucleus, as a symbol or a number
+#     gr_plot_prop_as_shape			plot property (a numerical variable) of a syllabic nucleus, as a shape
 #     gr_plot_prop_curve			plot property (a numerical variable) of a syllabic nucleus, as a curve 
 #     gr_plot_PitchTier_clip_nuclei plot stylization for syllabic nuclei with or without clipping
 #       gr_plot_stylisation         plot stylization for syllabic nuclei
@@ -85,6 +86,7 @@ procedure gr_start_picturewin
    tiny_fontsize = 4	; used for version stamp
    'font_family$'
    stylization_linewidth = 7
+   pitchrange_linewidth = 2
    Font size: fontsize
 endproc
 
@@ -101,6 +103,7 @@ procedure gr_start_demowin: .filename$
    'win$''font_family$'
    'win$'Font size: fontsize
    stylization_linewidth = 3
+   pitchrange_linewidth = 2
    'win$'Black
    # The size of the Demo window is (0..100, 0..100), with (0,0) the lower left corner.
    'win$'Select outer viewport: 0, 100, 0, 100
@@ -263,7 +266,7 @@ procedure gr_display_prosogram: x1, x2, y1, y2, with_grid
          @gr_draw_tiernames: newgridID, x1, x2
       endif
    endif
-   @gr_garnish: x1, x2, ySTbottom, ySTmin, ySTmax, 10, basename$
+   @gr_garnish: x1, x2, ySTbottom, ySTmin, ySTmax, 10, basename$, font_family$
 
    if (task != task_annotation)
       # Adjust plotted intensity range such that distance between horizontal lines = 3 dB
@@ -308,9 +311,6 @@ procedure gr_display_prosogram: x1, x2, y1, y2, with_grid
          if (needs_stylization)
             @gr_plot_nuclei: nucleiID, x1, x2, red$
          endif
-         if (show_pauses and task != task_pitch_plot)
-            @gr_plot_feature: nucleiID, nucldatID, j_pause_dur, x1, x2, "Right", 75, "#pause", "Blue"
-         endif
          if (show_lengthening)
             @gr_plot_lengthening: nucleiID, x1, x2, grey$
          endif
@@ -325,10 +325,6 @@ procedure gr_display_prosogram: x1, x2, y1, y2, with_grid
             ; @table_stats: nucldatID, "en_rhymedur", "mean", "sd", "min", "max"
             @gr_plot_prop_curve: nucleiID, nucldatID, j_en_rhymedur, x1, x2, -5, 5, red$, "Dashed"
          endif
-      else
-         if (show_pauses)
-            @gr_plot_feature: nucleiID, nucldatID, j_before_pause, x1, x2, "Right", 75, "feature:P", "Blue"
-         endif
       endif
 
       if (show_trajectories)
@@ -341,11 +337,23 @@ procedure gr_display_prosogram: x1, x2, y1, y2, with_grid
          @gr_plot_pitchrange: nucleiID, x1, x2, magenta$
       endif
 
-      if (polytonia_annotation) 
-         @gr_plot_feature: nucleiID, nucldatID, j_hesitation, x1, x2, "Centre", 60, "feature:H", "Blue"
+      if (show_pauses)
+         if (rich)
+            @gr_plot_feature: nucleiID, nucldatID, j_pause_dur, x1, x2, "Right", 75, "#pause", "Blue"
+         else
+            @gr_plot_feature: nucleiID, nucldatID, j_before_pause, x1, x2, "Right", 75, "feature:P", "Blue"
+         endif
       endif
+      if (show_hesitations) 
+         @gr_plot_feature: nucleiID, nucldatID, j_hesitation, x1, x2, "Centre", 60, "feature:Hes", "Blue"
+      endif
+
       if (show_prominence)
          @plot_prominence_measures: x1, x2
+      endif
+
+      if (show_rhythm)
+         @gr_plot_prop_curve: nucleiID, nucldatID, j_isodur, x1, x2, 0.0, 0.5, green$, "Solid"
       endif
 
       if (needs_stylization)
@@ -706,11 +714,12 @@ procedure gr_display_textgrid_pure: .gridID, .x1, .x2, .vpx1, .vpx2, .vpy1, .vpy
 endproc
 
 
-procedure gr_garnish: x1, x2, ybot, y1, y2, ystep, string$
+procedure gr_garnish: x1, x2, ybot, y1, y2, ystep, string$, .font$
 ; Y axis on ST scale : ybot = bottom of textgrid, y1 = bottom (min) of drawing, y2 = top (max) of drawing, ystep = y-distance between calibration marks for values
-; string$ = name of file
+; <string$>		= name of file
+; <.font$>		= font family used for garnish
    @debug_msg: "gr_garnish: show_y_scale='show_y_scale' show_tiernames='show_tiernames'"
-   .font$ = "Helvetica"
+   ; .font$ = "Helvetica"
  # Draw border of viewport
    'win$'Black
    'win$'Line width: 1
@@ -740,41 +749,41 @@ procedure gr_garnish: x1, x2, ybot, y1, y2, ystep, string$
             .yST = 10 * floor((y1+10)/10)
             while (.yST <= y2)
                'win$'Draw line: .x0, .yST, x1, .yST
-               'win$'Text special: .x0, "Right", .yST, "Half", "Helvetica", small_fontsize, "0", fixed$(.yST,0) 
+               'win$'Text special: .x0, "Right", .yST, "Half", .font$, small_fontsize, "0", fixed$(.yST,0) 
                .yST += ystep
             endwhile
-          if (show_y_scale_r)
+            if (show_y_scale_r)
          # Show Hz scale in right margin
-            'win$'Black
-            'win$'Solid line
-            .ystepHz = 25
-            .yHz = semitonesToHertz(y1 + hertzToSemitones(1))	; lower frequency value
-            .yHz = max(50, .yHz)
-            .ystepHz = 25
-            if (.yHz < 75)
-               .yHz = 75
-            else
-               .yHz = ceiling(.yHz/50) * 50
-            endif
-            .y2Hz = semitonesToHertz(y2 + hertzToSemitones(1))	; upper frequency value
-            .x3 = x2+(x2-x1)/200	; length of mark
-            while (.yHz <= .y2Hz)
-               .yST = hertzToSemitones(.yHz) - hertzToSemitones(1)
-               if (.yHz >= 300)
-                  .ystepHz = 100
-               elsif (.yHz >= 100)
-                  .ystepHz = 50
+               'win$'Black
+               'win$'Solid line
+               .ystepHz = 25
+               .yHz = semitonesToHertz(y1 + hertzToSemitones(1))	; lower frequency value
+               .yHz = max(50, .yHz)
+               .ystepHz = 25
+               if (.yHz < 75)
+                  .yHz = 75
+               else
+                   .yHz = ceiling(.yHz/50) * 50
                endif
-               'win$'Draw line: x2, .yST, .x3, .yST
-               .s$ = fixed$(.yHz,0)
-               if (.yHz + .ystepHz >= .y2Hz)
-                  .s$ = .s$ + " Hz"
-               endif
-               'win$'Text special: .x3, "Left", .yST, "Half", "Helvetica", small_fontsize, "0", .s$ 
-               .yHz += .ystepHz
-            endwhile
-            'win$'Black
-           endif ; show_y_scale_r
+               .y2Hz = semitonesToHertz(y2 + hertzToSemitones(1))	; upper frequency value
+               .x3 = x2+(x2-x1)/200	; length of mark
+               while (.yHz <= .y2Hz)
+                  .yST = hertzToSemitones(.yHz) - hertzToSemitones(1)
+                  if (.yHz >= 300)
+                     .ystepHz = 100
+                  elsif (.yHz >= 100)
+                     .ystepHz = 50
+                  endif
+                  'win$'Draw line: x2, .yST, .x3, .yST
+                  .s$ = fixed$(.yHz,0)
+                  if (.yHz + .ystepHz >= .y2Hz)
+                     .s$ = .s$ + " Hz"
+                  endif
+                  'win$'Text special: .x3, "Left", .yST, "Half", .font$, small_fontsize, "0", .s$ 
+                  .yHz += .ystepHz
+               endwhile
+               'win$'Black
+            endif ; show_y_scale_r
          else
             ; 'win$'Marks left every: 1, ystep, "no", "yes", "no"
          endif
@@ -787,12 +796,11 @@ procedure gr_garnish: x1, x2, ybot, y1, y2, ystep, string$
           s$ = "G='glissando'/T^2"
        endif
        .settings$ = "'segmentation_name$', " + s$ + ", DG='diffgt', dmin='mindur_ts:3'"
-       ; 'win$'Text special: x2, "Right", y2, "Top", "Helvetica", small_fontsize, "0.0", .settings$ 
+       ; 'win$'Text special: x2, "Right", y2, "Top", .font$, small_fontsize, "0.0", .settings$ 
    endif
    if (not demowin and show_settings)
     # Print version identification
          s$ = .settings$ + " \-- " + version$
-         ; 'win$'Text special: x2, "Right", ybot, "Top", "Helvetica", tiny_fontsize, "0.0", version$
          'win$'Text special: x2, "Right", ybot, "Top", .font$, small_fontsize, "0.0", s$
     # Show end of signal by double vertical line
       if (x2 > signal_finish)
@@ -941,7 +949,7 @@ procedure gr_plot_pitchrange: .gridID, .x1, .x2, .color$
    @interval_from_time: .gridID, speaker_tier, .x1, "first_interval"
    @interval_from_time: .gridID, speaker_tier, .x2, "last_interval"
    'win$'Dashed line
-   'win$'Line width: 2
+   'win$'Line width: pitchrange_linewidth
    for .i from first_interval to last_interval
       .t1 = Get start time of interval: speaker_tier, .i
       .t2 = Get end time of interval: speaker_tier, .i
@@ -956,6 +964,7 @@ procedure gr_plot_pitchrange: .gridID, .x1, .x2, .color$
          ; @msg: "gr_plot_pitchrange: undefined speaker=<'speaker$'> i='i' t1='.t1' t2='.t2' speakers='speakers$'"
       else
          'win$''.color$'
+         'win$'Line width: pitchrange_linewidth
          .ly1 = extractNumber (speaker_range_'speaker_j'$, "BOTTOM_ST=")
          .ly2 = extractNumber (speaker_range_'speaker_j'$, "TOP_ST=")
          if (.t1 >= .x1)							; draw left side
@@ -1133,7 +1142,7 @@ endproc
 
 
 procedure gr_plot_feature: .gridID, .table, .col, .x1, .x2, .just$, .y, .format$, .color$
-# For each syllable, draws text at Y-position, provided feature is true (i.e. >= 0)  
+# For each syllable in time range, draw text at Y-position, provided feature is true (i.e. >= 0)  
 # <.col>		index of a column in <.table>, i.e. some variable/feature/attribute.
 # <.y>			vertical position : percentage of Y range
 # <.x1>..<.x2>	time range
@@ -1253,8 +1262,8 @@ procedure gr_plot_prop_curve: .gridID, .table, .col, .wx1, .wx2, .wy1, .wy2, .co
 # Plots a line connecting the points (x,y), 
 # where x is the midtime of a given nucleus, and y the value of a property value of that nucleus.
 # Also draws the value y (as a number) at (x,y).
-# The nuclei are those of <gridID>, the values correspond to the value in <col> of <table>.
-#	<.col>							column for property
+# The nuclei are those of <.gridID>, the values correspond to the value in <.col> of <.table>.
+#	<.col>								column for property
 #	<.wx1>...<.wx2>, <.wy1>...<.wy2>	world coordinates to be used for the active viewport.
    'win$'Axes: .wx1, .wx2, .wy1, .wy2
    'win$''.color$'
@@ -1265,7 +1274,7 @@ procedure gr_plot_prop_curve: .gridID, .table, .col, .wx1, .wx2, .wy1, .wy2, .co
    elsif (.linestyle$ = "Dashed")
       'win$'Dashed line
    endif
-   intervals_from_time_range: .gridID, nucleus_tier, .wx1, .wx2, "first_interval", "last_interval"
+   @intervals_from_time_range: .gridID, nucleus_tier, .wx1, .wx2, "first_interval", "last_interval"
    for .i from first_interval to last_interval
       selectObject: .gridID
       @is_nucleus: .i
@@ -1378,7 +1387,7 @@ procedure gr_write_prosogram
          bb_y1 += 0.25	; top
          bb_x1 += 0.35
          bb_y2 -= 0.2	; bottom
-         bb_x2 -= 0.25
+         bb_x2 -= 0.5
       else				; wide or large
          bb_y1 += 0.1	; top (0.1 for PNG)
          bb_x1 += 0.35

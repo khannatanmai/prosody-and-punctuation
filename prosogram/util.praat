@@ -1,7 +1,7 @@
 # util.praat --- Praat include file containing some utilities
 #
 # This file isn't a stand-alone script. It is included (indirectly) by prosogram.praat. Use prosogram.praat instead.
-# Last modification: 2019-03-25
+# Last modification: 2020-01-16
 
 
 procedure files_get_regex: .varname$, .spec$
@@ -47,10 +47,11 @@ procedure file_rename: .oldfname$, .newfname$
         @file_windows_notation: .newfname$
         .newfname$ = result$
         @debug_msg: "Command=<rename '.oldfname$' '.newfname$'>"
-        runSystem: "rename ", .oldfname$, " ", .newfname$
+        .command$ = "rename"
      else
-        runSystem: "mv ", .oldfname$, " ", .newfname$
+        .command$ = "mv"
      endif
+     runSystem: .command$, " ", .oldfname$, " ", .newfname$
   endif  
 endproc
 
@@ -66,10 +67,11 @@ procedure file_copy: .srcfname$, .dstfname$
         @file_windows_notation: .dstfname$
         .dstfname$ = result$
         @debug_msg: "Command=<copy '.srcfname$' '.dstfname$'>"
-        runSystem: "copy ", .srcfname$, " ", .dstfname$
+        .command$ = "copy"
      else
-        runSystem: "cp ", .srcfname$, " ", .dstfname$
+        .command$ = "cp"
      endif
+     runSystem: .command$, " ", .srcfname$, " ", .dstfname$
   endif  
 endproc
 
