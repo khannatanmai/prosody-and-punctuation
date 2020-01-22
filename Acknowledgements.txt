@@ -1,0 +1,18 @@
+Prosogram
+
+https://sites.google.com/site/prosogram/download
+
+Mertens, Piet (2004) The Prosogram : Semi-Automatic Transcription of Prosody based on a Tonal Perception Model. in B. Bel & I. Marlien (eds.) Proceedings of Speech Prosody 2004, Nara (Japan), 23-26 March. (ISBN 2-9518233-1-2) 
+Mertens, Piet (2014) Polytonia: a system for the automatic transcription of tonal aspects in speech corpora Journal of Speech Sciences 4 (2), 17-57.
+Mertens, Piet (2004) Un outil pour la transcription de la prosodie dans les corpus oraux. Traitement Automatique des langues 45 (2), 109-130.
+
+Parselmouth
+
+https://github.com/YannickJadoul/Parselmouth
+
+Jadoul, Y., Thompson, B., & de Boer, B. (2018). Introducing Parselmouth: A Python interface to Praat. Journal of Phonetics, 71, 1-15. https://doi.org/10.1016/j.wocn.2018.07.001
+
+Praat
+
+Boersma, P., & Weenink, D. (2018). Praat: doing phonetics by computer [Computer program]. Version 6.0.43, retrieved 8 September 2018 from http://www.praat.org/
+
