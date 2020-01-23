@@ -1,0 +1,2 @@
+matplotlib==3.0.3
+praat-parselmouth==0.3.3
