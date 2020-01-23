@@ -1,7 +1,5 @@
 # Exploring the role of pitch in detecting clauses, sentence boundaries and questions
 
-As part of the ***Topics in Speech to Speech Machine Translation*** course.
-
 ### Tanmai Khanna
 ### Ganesh Mirishkar
 
