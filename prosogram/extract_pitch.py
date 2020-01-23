@@ -4,9 +4,8 @@ import matplotlib.pyplot as plt
 import parselmouth
 import re
 
-def run_file_with_pluseq(fn):
-    with open(fn) as f:
-        script = f.read()
+def run_script_with_pluseq(init_script):
+    script = init_script
 
     to_include = True
     while to_include:
@@ -20,14 +19,25 @@ def run_file_with_pluseq(fn):
     script = re.sub(r'((?:\w|\.)+\$)\s*\+=', r'\1 = \1 +', script)
     parselmouth.praat.run(script)
 
-run_file_with_pluseq('/Users/khannatanmai/Documents/NLP_Research/Prosody/FinalPresentation/prosogram/test_proso_script.praat')
+
+#MAIN
 
 if len(sys.argv) < 2:
-	print("Error! Give arguments: wavfile_data.txt wavfile_profile_data.txt")
+	print("Error! Give argument: input_file.wav")#wavfile_data.txt wavfile_profile_data.txt")
 	sys.exit(0)
 
-datafile_in = sys.argv[1]
-profile_in = sys.argv[2]
+file_in = sys.argv[1]
+
+init_script = 'include prosomain.praat\n'
+init_script += 'call prosogram file=' + file_in + ' save=yes draw=no\n'
+init_script += 'exit'
+
+run_script_with_pluseq(init_script) #Generate data and profile_data files using prosogram in praat
+
+#Now using the datafiles for patterns
+
+datafile_in = file_in[:-4] + "_data.txt" #removing ".wav"
+profile_in = file_in[:-4] + "_profile_data.txt"
 
 f = open(datafile_in)
 
